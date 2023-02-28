@@ -11,13 +11,20 @@ pub struct ThreadPool {
 }
 
 impl ThreadPool {
-    /// Create a new ThreadPool.
+    /// Creates a new thread pool capable of executing `size` number of jobs concurrently.
     ///
     /// The size is the number of threads in the pool.
     ///
     /// # Panics
     ///
     /// The `new` function will panic if the size is zero.
+    ///
+    /// # Examples
+    /// ```
+    /// use hello::ThreadPool;
+    ///
+    /// let pool = ThreadPool::new(4);
+    ///```
     pub fn new(size: usize) -> ThreadPool {
         assert!(size > 0);
 
@@ -35,13 +42,42 @@ impl ThreadPool {
             sender: Some(sender),
         }
     }
+
+    /// Executes the function `f` on a thread in the pool.
+    ///
+    /// # Examples
+    /// ```
+    /// use std::sync::atomic::AtomicI32;
+    /// use std::sync::atomic::Ordering::SeqCst;
+    /// use std::sync::Arc;
+    /// use hello::ThreadPool;
+    ///
+    /// let counter = Arc::new(AtomicI32::new(0));
+    /// {
+    ///     let size = 4;
+    ///     let pool = ThreadPool::new(size);
+    ///
+    ///     for _ in 0..size {
+    ///         let counter = Arc::clone(&counter);
+    ///         pool.execute(move || {
+    ///             counter.fetch_add(1, SeqCst);
+    ///         });
+    ///     }
+    /// }
+    ///
+    /// assert_eq!(counter.load(SeqCst), 4);
+    /// ```
     pub fn execute<F>(&self, f: F)
     where
         F: FnOnce() + Send + 'static,
     {
         let job = Box::new(f);
 
-        self.sender.as_ref().unwrap().send(job).unwrap();
+        self.sender
+            .as_ref()
+            .unwrap()
+            .send(job)
+            .expect("ThreadPool::execute unable to send job into queue.");
     }
 }
 
@@ -107,5 +143,26 @@ impl Worker {
             id,
             thread: Some(thread),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_works() {
+        let size = 4;
+        let pool = ThreadPool::new(size);
+        let (tx, rx) = mpsc::channel();
+        let expected = vec![1; size];
+
+        for _ in 0..size {
+            let tx = tx.clone();
+            pool.execute(move || tx.send(1).unwrap());
+        }
+        let res: Vec<i32> = rx.iter().take(size).collect();
+
+        assert_eq!(res, expected);
     }
 }
